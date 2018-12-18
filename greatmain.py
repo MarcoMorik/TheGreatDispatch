@@ -17,26 +17,27 @@ for i in range(box_count):
     
 goal= np.sum(W[:,0]) / 100.
 
-def delta(Y):
+def delta(X):
     #print(sum([sum(y) for y in Y]), file=sys.stderr)
-    if(sum([sum(y) for y in Y]) != box_cksm):
+    if(sum([sum(t) for t in X]) != box_cksm):
+        print("Checksum wrong, score will be not used", X,  file=sys.stderr)
         return box_count*100
-    X = distribute(Y)
-    return np.max(X[:,0]) - np.min(X[:,0])
+    Y = distribute(X)
+    return np.max(Y[:,0]) - np.min(Y[:,0])
     
 
-def distribute(Y):
+def distribute(X):
     """Convert a distribution of boxes to the corresponding weights/volumes """
-    global W
+    #global W
     
     
-    X = np.zeros((truck_count,2))
+    Y = np.zeros((truck_count,2))
     #print("Package distributed", sum([len(y) for y in Y]), file=sys.stderr)
     
-    X[:,0] = [sum([W[b,0] for b in t]) for t in Y]
-    X[:,1] = [sum([W[b,1] for b in t]) for t in Y]
-    assert(np.max(X[:,1]) <= 100)
-    return X
+    Y[:,0] = [sum([W[b,0] for b in t]) for t in X]
+    Y[:,1] = [sum([W[b,1] for b in t]) for t in X]
+    assert(np.max(Y[:,1]) <= 100)
+    return Y
     
 def prob_assign(X,Y, free_boxes):
     total = len(free_boxes)
@@ -44,13 +45,19 @@ def prob_assign(X,Y, free_boxes):
     #print("Assigned boxes", [len(b) for b in Y], file=sys.stderr)
     
     
-    print(sum([len(b) for b in Y]), total, file=sys.stderr)
-    #print("Max Boxnumber",np.max([b]), file=sys.stderr)
-    #Check for double element
-    assert(len([r for t in Y for r in t ]) == len(list(set([r for t in Y for r in t ]))))
     
-    assert(sum([len(b) for b in Y]) == box_count - total)
-    assert(np.max(X[:,1]) <=100)
+    #print("Max Boxnumber",np.max([b]), file=sys.stderr)
+    assigned_pckgs = [r for t in X for r in t ]
+    #print("Assigned",len(assigned_pckgs),"free", total, "Boxcount:", box_count, file=sys.stderr)
+    assert(len(free_boxes) + len(assigned_pckgs) == box_count )
+    
+    #print("Assignment",, file=sys.stderr)
+    #Check for double element
+    
+    assert(len([r for t in X for r in t ]) == len(list(set([r for t in X for r in t ]))))
+    
+    assert(sum([len(b) for b in X]) == box_count - total)
+    assert(np.max(Y[:,1]) <=100)
     for package in range(len(free_boxes)+10):
         
         #print(Y, " total length \n", sum([len(y) for y in Y]), file=sys.stderr)
@@ -58,8 +65,8 @@ def prob_assign(X,Y, free_boxes):
         if len(free_boxes) <= 0:
             #Done
             #print(sum([len(y) for y in Y]), file=sys.stderr)
-            assert(len(Y)==truck_count and sum([len(b) for b in Y]) == box_count)
-            return Y
+            assert(len(X)==truck_count and sum([len(b) for b in X]) == box_count)
+            return X
             
         #if(len(free_boxes) == np.count_nonzero([not len(y) for y in Y])):
         #    free_trucks = np.nonzero([not len(y) for y in Y])
@@ -71,35 +78,34 @@ def prob_assign(X,Y, free_boxes):
         if(choice <= 0.1):
             b = free_boxes.pop(np.random.randint(len(free_boxes)))
             w,v = W[b,:]
-            truck_score = np.argsort( (X[:,0]+w-goal))
+            truck_score = np.argsort( (Y[:,0]+w-goal))
             
         elif(choice <=0.2):
             b = free_boxes.pop(np.random.randint(len(free_boxes)))
             w,v = W[b,:]
-            truck_score = np.argsort( abs((X[:,0]+w-goal)))
+            truck_score = np.argsort( Y[:,0]+w-goal)
         elif(choice <=0.6 and package >=total/2):
             b = free_boxes.pop(np.argmin([W[x,0] for x in free_boxes]))
             w,v = W[b,:]
-            truck_score = np.argsort( abs((X[:,0]+w-goal)))
+            truck_score = np.argsort( Y[:,0]+w-goal)
         
         else:
             b = free_boxes.pop(np.argmax([W[x,0] for x in free_boxes]))
             w,v = W[b,:]
-            truck_score = np.argsort( (X[:,0]+w-goal))
+            truck_score = np.argsort( (Y[:,0]+w-goal))
            
         for t in truck_score:
-            if(X[t,1] + v <=100 and b not in [b  for t in Y for b in t]):
-                X[t,0] += w
-                X[t,1] += v
-                Y[t].append(b)
-                
+            if(Y[t,1] + v <=100):
+                Y[t,0] += w
+                Y[t,1] += v
+                X[t] = X[t]+[b]
                 break
     print("Could not fill all ", file=sys.stderr)
     return None
             
-def Y_to_Out(Y):
+def X_to_Out(X):
     out = [0 for i in range(box_count)]
-    for t,y in enumerate(Y):
+    for t,y in enumerate(X):
         for b in y:
             out[b]=str(t)
     print(" ".join(out))
@@ -109,19 +115,25 @@ def resample(top_5,X,Y):
     """X: 100x2x25
     Y: 25x100x? """
     j=0
-    for A in top_5:
+    best_samples = [X[A].copy() for A in top_5]
+    best_boxes = [Y[:,:,A].copy() for A in top_5]
+    for a in top_5:
+        
+        best_dist = best_samples[int(j/5)]
         for i in range(5):
-            best_trucks  = np.argsort([ abs(X[t,0,A]-goal) for t in range(truck_count)])
+            #print(" truck load of first trucks" , Y[0,:,a], file=sys.stderr)
+            best_trucks  = np.argsort([ abs(Y[t,0,a]-goal) for t in range(truck_count)])            
             
+            #A represents X[j] as we use the best models 5 times
+            X[j] = [x if i in best_trucks[:50] and np.random.rand() <0.5 else [] for i,x in enumerate(best_dist)]#A) ]
             
-            #A represents Y[j] as we use the best models 5 times
-            Y[j] = [y if i in best_trucks[:50] and np.random.rand() <0.5 else [] for i,y in enumerate(Y[A])]#A) ]
+            assert(len([r for t in X[j] for r in t ] )== len(list(set([r for t in X[j] for r in t ]))))
             
-            assert(len([r for t in Y[j] for r in t ] )== len(list(set([r for t in Y[j] for r in t ]))))
-            X[:,:,j] = distribute(Y[j])
-           
             j = j+1
             
+    for s,x in enumerate(X):
+        
+        Y[:,:,s] = distribute(x)
             
     return X, Y
             
@@ -132,8 +144,9 @@ def find_solution():
     print(min(W[:,0]),max(W[:,0]),min(W[:,1]),max(W[:,1]),file=sys.stderr)
     #First box, with maximum weight 
     B = list(range(box_count))
-    X = np.zeros((truck_count,2,sample_size))
-    Y = [[[] for i in range(truck_count)] for j in range(sample_size)]
+    Y = np.zeros((truck_count,2,sample_size))
+    X = [[[] for i in range(truck_count)] for j in range(sample_size)]
+    X_new = [[[] for i in range(truck_count)] for j in range(sample_size)]
     
     """
     sorted_box = np.argsort(W[:,0])
@@ -148,35 +161,35 @@ def find_solution():
     """ 
     top=1000000
     for epoch in range(5):
-        for i in range(sample_size):
-            #B = [b for b in range(box_count) if not b in [b  for t in Y[i] for b in t]]
-            B = [b for b in range(box_count)]
-            for t in Y[i]:
-                for b in t:
-                    if(b in B):
-                        B.remove(b)
-                    else:
-                        print("could not find box", b, file=sys.stderr)
+        
+        X_new = [[[] for i in range(truck_count)] for j in range(sample_size)]
+        for x in X:
+            assert(len([r for t in x for r in t ] )== len(list(set([r for t in x for r in t ]))))
+        for i,x in enumerate(X):
+            assert(len([r for t in x for r in t ] )== len(list(set([r for t in x for r in t ]))))
+            B = [b for b in range(box_count) if not b in [b  for t in x for b in t]]
             #print("B,S,Y",len(B), len(Y), len(Y[i]), file=sys.stderr)
-            y_next = prob_assign(X[:,:,i],Y[i], B)
-            assert(len([r for t in  y_next for r in t ]) == len(list(set([r for t in  y_next for r in t ]))))
-            if y_next is not None:
-                Y[i] = y_next
+            x_next = prob_assign(X[i],Y[:,:,i], B)
             
-        scores = [delta(y) for y in Y]
+            assert(len([r for t in  x_next for r in t ]) == len(list(set([r for t in  x_next for r in t ]))))
+            if x_next is not None:
+                X_new[i] = x_next
+        X = X_new[:]
+        
+        scores = [delta(x) for x in X]
         rank = np.argsort(scores) 
         
         print("Best Score", [scores[r] for r in rank[0:4]], file=sys.stderr)
         if(scores[rank[0]]< top):
-            result = Y[rank[0]]
+            result = X[rank[0]]
             top = scores[rank[0]]
         
         for r in rank[:5]:
-            
-            assert(len([r for t in  Y[r] for r in t ]) == len(list(set([r for t in  Y[r] for r in t ]))))
+            assert(len([r for t in  X[r] for r in t ]) == len(list(set([r for t in  X[r] for r in t ]))))
         X, Y = resample(rank[:5],X,Y)
-        
-    Y_to_Out(result)
+        for j in range(25):
+            assert(len([r for t in X[j] for r in t ] )== len(list(set([r for t in X[j] for r in t ]))))
+    X_to_Out(result)
 
 find_solution()
 
